@@ -1,0 +1,15 @@
+[submodule "hmkit-core"]
+	path = hmkit-core
+	url = git@github.com:highmobility/hmkit-core.git
+[submodule "btstack"]
+	path = btstack
+	url = git@github.com:bluekitchen/btstack.git
+[submodule "hmkit-crypto-c"]
+	path = hmkit-crypto-c
+	url = git@github.com:highmobility/hmkit-crypto-c.git
+[submodule "hmkit-persistence-sqlite-c"]
+	path = hmkit-persistence-sqlite-c
+	url = git@github.com:highmobility/hmkit-persistence-sqlite-c.git
+[submodule "hmkit-python"]
+	path = hmkit-python
+	url = git@github.com:highmobility/hmkit-python.git
