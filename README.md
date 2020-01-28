@@ -91,4 +91,5 @@ See more in [CONTRIBUTING.md](https://github.com/highmobility/hmkit-python-works
 ## License ##
 
 This repository is using MIT license. See more in [LICENSE](https://github.com/highmobility/hmkit-python-workspace/blob/master/LICENSE)
+The included BTstack submodule is free for non-commercial use only (BSD 3-Clause License).
 
