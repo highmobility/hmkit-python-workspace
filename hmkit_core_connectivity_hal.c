@@ -25,6 +25,10 @@ THE SOFTWARE.
 #include "hmkit_core_connectivity_hal.h"
 #include "hmkit_core_conf_access.h"
 
+#include <fcntl.h>
+#include <inttypes.h>
+#include <signal.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +38,9 @@ THE SOFTWARE.
 #include <inttypes.h>
 #include <errno.h>
 
+#include <sys/stat.h>
+#include <termios.h>
+#include <unistd.h>
 
 #include "btstack_config.h"
 
@@ -64,9 +71,10 @@ THE SOFTWARE.
 #include "btstack_chipset_bcm.h"
 #include "btstack_chipset_bcm_download_firmware.h"
 #include "btstack_control_raspi.h"
-//------------------------------------------------//
 
-int btstack_main(int argc, const char * argv[]);
+#include "raspi_get_model.h"
+
+//------------------------------------------------//
 
 typedef enum  {
     UART_INVALID,
@@ -160,7 +168,7 @@ uint8_t is_bt_connection_available(uint8_t *mac);
 void create_bt_connection(uint8_t *mac);
 void delete_bt_connection(uint8_t *mac);
 
-static void packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
+static void attr_packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
 void btstack_inits(void);
 void convert_mtu_str(uint16_t mtu, uint8_t *mtu_str);
 
@@ -220,6 +228,18 @@ bt_connection_t *get_bt_connection_using_mac(uint8_t *mac){
   }
 
   return NULL;
+}
+
+uint8_t *get_bt_mac(bt_connection_t *connection){
+
+	if(connection != NULL)
+	{
+		return &(connection->mac);
+	}
+	else
+	{
+		return NULL;
+	}
 }
 
 bt_character_t *get_bt_character(bt_connection_t *connection, uint8_t character_id){
@@ -291,7 +311,6 @@ void delete_bt_connection(uint8_t *mac){
   }
 }
 
-static btstack_packet_callback_registration_t hci_event_callback_registration;
 
 //-------------------------//
 
@@ -341,13 +360,103 @@ static uart_type_t raspi_get_bluetooth_uart_type(void){
         // contains assigned pins
         int pins = count / 4;
         if( pins == 4 ){
+	    hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"%s() UART_HARDWARE_FLOW \n", __FUNCTION__);
             return UART_HARDWARE_FLOW;
         } else {
+	    hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"%s() UART_HARDWARE_NO_FLOW \n", __FUNCTION__);
             return UART_HARDWARE_NO_FLOW;
         }
     } else {
+	hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"%s() UART_SOFTWARE_NO_FLOW \n", __FUNCTION__);
         return UART_SOFTWARE_NO_FLOW;
     }
+}
+
+static int raspi_speed_to_baud(speed_t baud)
+{
+
+    switch (baud) {
+        case B9600:
+            return 9600;
+        case B19200:
+            return 19200;
+        case B38400:
+            return 38400;
+        case B57600:
+            return 57600;
+        case B115200:
+            return 115200;
+        case B230400:
+            return 230400;
+        case B460800:
+            return 460800;
+        case B500000:
+            return 500000;
+        case B576000:
+            return 576000;
+        case B921600:
+            return 921600;
+        case B1000000:
+            return 1000000;
+        case B1152000:
+            return 1152000;
+        case B1500000:
+            return 1500000;
+        case B2000000:
+            return 2000000;
+        case B2500000:
+            return 2500000;
+        case B3000000:
+            return 3000000;
+        case B3500000:
+            return 3500000;
+        case B4000000:
+            return 4000000;
+        default:
+            return -1;
+    }
+}
+
+static void raspi_get_terminal_params( hci_transport_config_uart_t *tc )
+{
+    // open serial terminal and get parameters
+
+    int fd = open( tc->device_name, O_RDONLY );
+    if( fd < 0 )
+    {
+        perror( "can't open serial port" );
+        return;
+    }
+    struct termios tios;
+    tcgetattr( fd, &tios );
+    close( fd );
+
+    speed_t ospeed = cfgetospeed( &tios );
+    int baud = raspi_speed_to_baud( ospeed );
+    hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"current serial terminal parameter baudrate: %d, flow control: %s\n", baud, (tios.c_cflag&CRTSCTS)?"Hardware":"None");
+
+    // overwrites the initial baudrate only in case it was likely to be altered before
+    if( baud > 9600 )
+    {
+        tc->baudrate_init = baud;
+        tc->flowcontrol = (tios.c_cflag & CRTSCTS)?1:0;
+    }
+
+}
+
+static void sigint_handler(int param){
+//    UNUSED(param);
+
+    log_info("sigint_handler: shutting down");
+
+    // reset anyway
+    btstack_stdin_reset();
+
+    // power down
+    hci_power_control(HCI_POWER_OFF);
+    hci_close();
+    log_info("Good bye, see you.\n");
+    exit(0);
 }
 
 static void phase2(int status);
@@ -360,10 +469,10 @@ int btstack_start(){
     btstack_memory_init();
 
     // use logger: format HCI_DUMP_PACKETLOGGER, HCI_DUMP_BLUEZ or HCI_DUMP_STDOUT
-    //const char * pklg_path = "/tmp/hci_dump.pklg";
-    //hci_dump_open(pklg_path, HCI_DUMP_PACKETLOGGER);
+    const char * pklg_path = "/tmp/hci_dump.pklg";
+    hci_dump_open(pklg_path, HCI_DUMP_PACKETLOGGER);
+    // to print BtStack logs in STDOUT console use HCI_DUMP_STDOUT instead of HCI_DUMP_PACKETLOGGER
     //hci_dump_open(NULL, HCI_DUMP_STDOUT);
-    //printf("Packet Log: %s\n", pklg_path);
 
     // setup run loop
     btstack_run_loop_init(btstack_run_loop_posix_get_instance());
@@ -376,32 +485,55 @@ int btstack_start(){
     raspi_get_bd_addr(addr);
 
     // set UART config based on raspi Bluetooth UART type
+    int bt_reg_en_pin = -1;
+    bool power_cycle = true;
     switch (raspi_get_bluetooth_uart_type()){
         case UART_INVALID:
             fprintf(stderr, "can't verify HW uart, %s\n", strerror( errno ) );
             return -1;
         case UART_SOFTWARE_NO_FLOW:
             // ??
-            printf("Software UART without flowcontrol, 460800 baud, H5, BT_REG_EN at GPIO 128l\n");
+            //printf("Software UART without flowcontrol, 460800 baud, H5, BT_REG_EN at GPIO 128l\n");
+	    bt_reg_en_pin = 128;
             transport_config.baudrate_main = 460800;
             transport_config.flowcontrol = 0;
-            btstack_control_raspi_set_bt_reg_en_pin(128);
             break;
         case UART_HARDWARE_NO_FLOW:
             // Raspberry Pi 3 B
-            printf("Hardware UART without flowcontrol, 921600 baud, H5, BT_REG_EN at GPIOO 128\n");
+            // Raspberry Pi 3 A
+            // Raspberry Pi 3 B
+            // power up with H5 and without power cycle untested/unsupported
+            bt_reg_en_pin = 128;
+	    //printf("Hardware UART without flowcontrol, 921600 baud, H5, BT_REG_EN at GPIOO 128\n");
             transport_config.baudrate_main = 921600;
             transport_config.flowcontrol = 0;
-            btstack_control_raspi_set_bt_reg_en_pin(128);
             break;
         case UART_HARDWARE_FLOW:
-            // Raspberry Pi Zero W
-            printf("Hardware UART with flowcontrol, 921600 baud, H4, BT_REG_EN at GPIO 45\n");
-            transport_config.baudrate_main = 921600;
+            // Raspberry Pi Zero W gpio 45, 3 mbps does not work (investigation pending)
+            // Raspberry Pi 3A+ vgpio 129 but WLAN + BL
+            // Raspberry Pi 3B+ vgpio 129 but WLAN + BL
             transport_config.flowcontrol = 1;
-            btstack_control_raspi_set_bt_reg_en_pin(45);
+            int model = raspi_get_model();
+            if (model == MODEL_ZERO_W){
+                bt_reg_en_pin =  45;
+                transport_config.baudrate_main =  921600;
+            } else {
+                bt_reg_en_pin = 129;
+                transport_config.baudrate_main = 3000000;
+            }
+
+#ifdef ENABLE_CONTROLLER_WARM_BOOT
+            power_cycle = false;
+#else
+            // warn about power cycle on devices with shared reg_en pins
+            if (model == MODEL_3APLUS || model == MODEL_3BPLUS){
+                printf("Wifi and Bluetooth share a single RESET line and BTstack needs to reset Bluetooth -> SSH over Wifi will fail\n");
+                printf("Please add ENABLE_CONTROLLER_WARM_BOOT to btstack_config.h to enable startup without RESET\n");
+            }
+#endif
             break;
     }
+    printf("%s, %u, BT_REG_EN at GPIO %u, %s\n", transport_config.flowcontrol ? "H4":"H5", transport_config.baudrate_main, bt_reg_en_pin, power_cycle ? "Reset Controller" : "Warm Boot");
 
     // get BCM chipset driver
     const btstack_chipset_t * chipset = btstack_chipset_bcm_instance();
@@ -409,9 +541,6 @@ int btstack_start(){
 
     // set path to firmware files
     btstack_chipset_bcm_set_hcd_folder_path("/lib/firmware/brcm");
-
-    // set chipset name
-    btstack_chipset_bcm_set_device_name("BCM43430A1");
 
     // setup UART driver
     const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
@@ -431,35 +560,46 @@ int btstack_start(){
     }
 
     // setup HCI (to be able to use bcm chipset driver)
-    const btstack_link_key_db_t * link_key_db = btstack_link_key_db_fs_instance();
     hci_init(transport, (void*) &transport_config);
     hci_set_bd_addr( addr );
     hci_set_chipset(btstack_chipset_bcm_instance());
-#ifdef ENABLE_CLASSIC
-    hci_set_link_key_db(link_key_db);
-#endif
 
     // inform about BTstack state
     hci_event_callback_registration.callback = &hci_packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
 
-    // main_argc = argc;
-    // main_argv = argv;
+    // handle CTRL-c
+    signal(SIGINT, sigint_handler);
 
-    // power cycle Bluetooth controller
-    btstack_control_t *control = btstack_control_raspi_get_instance();
-    control->init(NULL);
-    control->off();
-    usleep( 100000 );
-    control->on();
+    //main_argc = argc;
+    //main_argv = argv;
 
-    // for h4, we're done
+    // power cycle Bluetooth controller on older models without flowcontrol
+    if (power_cycle){
+        //printf("**** Doing power_cycle \n");
+        btstack_control_raspi_set_bt_reg_en_pin(bt_reg_en_pin);
+        btstack_control_t *control = btstack_control_raspi_get_instance();
+        control->init(NULL);
+        control->off();
+        usleep( 100000 );
+        control->on();
+    }
+
     if (transport_config.flowcontrol){
+
         //printf("**** Flow control \n");
-        // setup app
-        // btstack_main(main_argc, main_argv);
-		btstack_inits();
+        // re-use current terminal speed (if there was no power cycle)
+        if (!power_cycle){
+            raspi_get_terminal_params( &transport_config );
+        }
+
+	btstack_inits();
+
     } else {
+
+        // assume BCM4343W used in Pi 3 A/B. Pi 3 A/B+ have a newer controller but support H4 with Flowcontrol
+        btstack_chipset_bcm_set_device_name("BCM43430A1");
+
         // phase #1 download firmware
         printf("Phase 1: Download firmware\n");
 
@@ -468,13 +608,7 @@ int btstack_start(){
     }
 
     // go
-    // btstack_run_loop_execute(); // PSS
-
-    // set one-shot timer
-    heartbeat.process = &heartbeat_handler;
-    btstack_run_loop_set_timer(&heartbeat, HEARTBEAT_PERIOD_MS);
-    btstack_run_loop_add_timer(&heartbeat);
-
+    //btstack_run_loop_execute();
 
     return 0;
 }
@@ -489,8 +623,6 @@ static void phase2(int status){
 
     printf("Phase 2: Main app\n");
 
-    // setup app
-    //btstack_main(main_argc, main_argv);
 }
 
 
@@ -510,7 +642,7 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
   switch (event) {
     case HCI_EVENT_LE_META: {
-	///printf("%s(),  HCI_EVENT_LE_META: \n", __FUNCTION__ );
+      //printf("%s(),  HCI_EVENT_LE_META: \n", __FUNCTION__ );
       if (hci_event_le_meta_get_subevent_code(packet) !=  HCI_SUBEVENT_LE_CONNECTION_COMPLETE) break;
 
       hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"[HMCONNECTIVITY] CONNECT COMPLETE");
@@ -524,7 +656,7 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
         return;
       }
 
-      ///printf("%s(),  HCI_EVENT_LE_META: create_bt_connection\n", __FUNCTION__ );
+      //printf("%s(),  HCI_EVENT_LE_META: create_bt_connection\n", __FUNCTION__ );
       create_bt_connection(address);
       bt_connection_t *connection = get_bt_connection_using_mac(address);
       if(connection == NULL){
@@ -534,15 +666,12 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
 
       connection->handle = hci_subevent_le_connection_complete_get_connection_handle(packet);
 
-      //hmkit_core_link_connect(connection, address);
       hmkit_core_link_connect((uint64_t)0x00, address);
-
-      ///printf("%s(),  HCI_EVENT_LE_META: END \n", __FUNCTION__ );
 
       break;
     }
     case HCI_EVENT_DISCONNECTION_COMPLETE: {
-	///printf("%s(),  HCI_EVENT_DISCONNECTION_COMPLETE:\n", __FUNCTION__ );
+      //printf("%s(),  HCI_EVENT_DISCONNECTION_COMPLETE:\n", __FUNCTION__ );
       hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"[HMCONNECTIVITY] DISCONNECT COMPLETE");
       handle = hci_event_disconnection_complete_get_connection_handle(packet);
       bt_connection_t *connection = get_bt_connection_using_handle(handle);
@@ -553,19 +682,34 @@ static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *p
       delete_bt_connection(connection->mac);
       break;
     }
-	case BTSTACK_EVENT_STATE:
-		if (btstack_event_state_get_state(packet) != HCI_STATE_WORKING) break;
-		gap_local_bd_addr(addr);
-		printf("BTstack up and running at %s\n",  bd_addr_to_str(addr));
+
+    case BTSTACK_EVENT_STATE:
+	if (btstack_event_state_get_state(packet) != HCI_STATE_WORKING) break;
+	gap_local_bd_addr(addr);
+	printf("BTstack up and running at %s\n",  bd_addr_to_str(addr));
 #if 0
-		// setup TLV
-		strcpy(tlv_db_path, TLV_DB_PATH_PREFIX);
-		strcat(tlv_db_path, bd_addr_to_str(addr));
-		strcat(tlv_db_path, TLV_DB_PATH_POSTFIX);
-		tlv_impl = btstack_tlv_posix_init_instance(&tlv_context, tlv_db_path);
-		btstack_tlv_set_instance(tlv_impl, &tlv_context);
+	// setup TLV
+	strcpy(tlv_db_path, TLV_DB_PATH_PREFIX);
+	strcat(tlv_db_path, bd_addr_to_str(addr));
+	strcat(tlv_db_path, TLV_DB_PATH_POSTFIX);
+	tlv_impl = btstack_tlv_posix_init_instance(&tlv_context, tlv_db_path);
+	btstack_tlv_set_instance(tlv_impl, &tlv_context);
 #endif
-		break;
+	break;
+
+        case HCI_EVENT_COMMAND_COMPLETE:
+	    //printf("***** %s() HCI_EVENT_COMMAND_COMPLETE \n", __FUNCTION__);
+            if (HCI_EVENT_IS_COMMAND_COMPLETE(packet, hci_read_local_name))
+	    {
+                if (hci_event_command_complete_get_return_parameters(packet)[0]) break;
+                // terminate, name 248 chars
+                packet[6+248] = 0;
+                printf("Local name: %s\n", &packet[6]);
+
+                btstack_chipset_bcm_set_device_name((const char *)&packet[6]);
+            }
+            break;
+
     default:
 //  printf("********* %s(): default \n", __FUNCTION__);
       break;
@@ -616,7 +760,7 @@ uint32_t hmkit_core_connectivity_hal_advertisement_start(uint8_t *issuerId, uint
 
 uint32_t hmkit_core_connectivity_hal_advertisement_stop(){
 
-  ///printf("********* Enter %s() \n", __FUNCTION__);
+  hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"[HMCONNECTIVITY] ADV STOP");
   gap_advertisements_enable(0);
 
   return 0;
@@ -693,13 +837,14 @@ static uint16_t att_read_callback(hci_con_handle_t con_handle, uint16_t att_hand
       // ex: { 'P', 'y','S','d','k',0x00,0x00,0x00,0x00,0x00,'M','T','U','1','0','0'};
       uint8_t info[16] = { 'P', 'y','S','d','k',0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
       bt_connection_t *connection = get_bt_connection_using_handle(con_handle);
-      if(connection != NULL){
-      // copy the MTU string in the last 6 bytes
-      memcpy(info+15-6, g_mtu_str, 6);
+      if(connection != NULL)
+      {
+	// copy the MTU string in the last 6 bytes
+	memcpy(info+15-6, g_mtu_str, 6);
       }
       else
       {
-	printf("***********  %s() , connection == NULL\n", __FUNCTION__);
+	printf("*****  %s() , connection == NULL, MTU not copied to info\n", __FUNCTION__);
       }
 
       memcpy(buffer, info, 16);
@@ -715,37 +860,36 @@ static uint16_t att_read_callback(hci_con_handle_t con_handle, uint16_t att_hand
   }
 
   if(att_handle == ATT_CHARACTERISTIC_713d0106_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE){
-//printf("%s() %d  ATT_CHARACTERISTIC_713d0106_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE - 106\n", __FUNCTION__, __LINE__);
+    //printf("%s() %d  ATT_CHARACTERISTIC_713d0106_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE - 106\n", __FUNCTION__, __LINE__);
     if (buffer){
-      hmkit_core_log_data(NULL,NULL,HMKIT_CORE_LOG_INFO,&connection->read_buffer_06[offset], buffer_size,"[HMCONNECTIVITY] 106 READ %X", att_handle);
-      memcpy(buffer, &connection->read_buffer_06[offset], buffer_size);
+	hmkit_core_log_data(NULL,NULL,HMKIT_CORE_LOG_INFO,&connection->read_buffer_06[offset], buffer_size,"[HMCONNECTIVITY] 106 READ %X", att_handle);
+	memcpy(buffer, &connection->read_buffer_06[offset], buffer_size);
 
- // printf("**** %s() , buffer valid, size = %d\n", __FUNCTION__, buffer_size);
+	// printf("**** %s() , buffer valid, size = %d\n", __FUNCTION__, buffer_size);
 
-	  // invoke link write response after this read
-      att_server_request_can_send_now_event(connection->handle);
-	  blink_write_resp = 1;
-
-      return buffer_size;
+	// invoke link write response after this read
+        att_server_request_can_send_now_event(connection->handle);
+	blink_write_resp = 1;
+	return buffer_size;
     } else {
-//  printf("**** %s() , buffer null, read_buffer_06_size = %d \n", __FUNCTION__, connection->read_buffer_06_size);
-      return connection->read_buffer_06_size;
+	//  printf("**** %s() , buffer null, read_buffer_06_size = %d \n", __FUNCTION__, connection->read_buffer_06_size);
+	return connection->read_buffer_06_size;
     }
   }
-  else if(att_handle == ATT_CHARACTERISTIC_713d0102_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE){
-//printf("%s() %d ATT_CHARACTERISTIC_713d0102_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE  - 102\n", __FUNCTION__, __LINE__);
+  else if(att_handle == ATT_CHARACTERISTIC_713d0102_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE)
+  {
+    //printf("%s() %d ATT_CHARACTERISTIC_713d0102_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE  - 102\n", __FUNCTION__, __LINE__);
     if (buffer){
       hmkit_core_log_data(NULL,NULL,HMKIT_CORE_LOG_INFO,&connection->read_buffer_06[offset], buffer_size,"[HMCONNECTIVITY] 102 READ %X", att_handle);
       memcpy(buffer, &connection->read_buffer_02[offset], buffer_size);
-  //printf("**** %s() , buffer valid, size = %d\n", __FUNCTION__, buffer_size);
+      //printf("**** %s() , buffer valid, size = %d\n", __FUNCTION__, buffer_size);
       return buffer_size;
     } else {
-  //printf("**** %s() , buffer null, read_buffer_02_size = %d\n", __FUNCTION__, connection->read_buffer_02_size);
+      //printf("**** %s() , buffer null, read_buffer_02_size = %d\n", __FUNCTION__, connection->read_buffer_02_size);
       return connection->read_buffer_02_size;
     }
   }
 
-  //printf("**** return %s() , \n", __FUNCTION__);
   return 0;
 }
 
@@ -763,6 +907,7 @@ static int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, 
     return 0;
   }
 
+  //printf("** %s() , size = %d \n", __FUNCTION__, buffer_size);
   if(att_handle == ATT_CHARACTERISTIC_713d0107_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE){
     hmkit_core_link_incoming_data((uint64_t)0x00, buffer, buffer_size, connection->mac, hmkit_core_characteristic_sensing_write);
   }
@@ -774,7 +919,7 @@ static int att_write_callback(hci_con_handle_t con_handle, uint16_t att_handle, 
   return 0;
 }
 
-static void packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
+static void attr_packet_handler (uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size){
 UNUSED(channel);
 int ret =0;
 uint16_t mtu = 0;
@@ -785,9 +930,9 @@ uint16_t mtu = 0;
       switch (hci_event_packet_get_type(packet)) {
 
         case ATT_EVENT_CAN_SEND_NOW: {
-			log_info("HIGH-MOBILITY: received ATT_EVENT_CAN_SEND_NOW ");
+	  log_info("HIGH-MOBILITY: received ATT_EVENT_CAN_SEND_NOW ");
   
-	///printf("***** %s() ATT_EVENT_CAN_SEND_NOW \n", __FUNCTION__);
+	  //printf("***** %s() ATT_EVENT_CAN_SEND_NOW \n", __FUNCTION__);
 
           bt_connection_t *connection = get_bt_connection_using_mac(read_buffer_02_mac);
           if(connection == NULL){
@@ -811,31 +956,54 @@ uint16_t mtu = 0;
             hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"[HMCONNECTIVITY] CAN SEND NOW %x, ret = %d",ATT_CHARACTERISTIC_713d0106_503e_4c75_ba94_3148f18d941e_01_VALUE_HANDLE, ret);
           }
 
-	  	  if(blink_write_resp == true)
-		  {
-			 //hmkit_core__link_write_response((uint64_t)0x00, NULL, hmkit_core_characteristic_link_write);
-			 hmkit_core_link_write_response((uint64_t)0x00, read_buffer_06_mac, hmkit_core_characteristic_link_write);
-			 ///printf("***** %s() ATT_EVENT_CAN_SEND_NOW, blink_write_resp \n", __FUNCTION__);
-			 blink_write_resp = false;
-		  }
+	  if(blink_write_resp == true)
+	  {
+		 //hmkit_core__link_write_response((uint64_t)0x00, NULL, hmkit_core_characteristic_link_write);
+		 hmkit_core_link_write_response((uint64_t)0x00, read_buffer_06_mac, hmkit_core_characteristic_link_write);
+		 ///printf("***** %s() ATT_EVENT_CAN_SEND_NOW, blink_write_resp \n", __FUNCTION__);
+		 blink_write_resp = false;
+	  }
 
           break;
         }
 
 	case ATT_EVENT_MTU_EXCHANGE_COMPLETE:
+
 	    mtu = att_event_mtu_exchange_complete_get_MTU(packet);
 	    printf(" ****** ATT MTU = %u\n", mtu);
-	    bt_connection_t *connection = get_bt_connection_using_mac(read_buffer_06_mac);
+
+	    bt_connection_t *connection = get_bt_connection_using_handle(att_event_mtu_exchange_complete_get_handle(packet));
             if(connection == NULL){
 	    printf(" ERROR ****** ATT MTU, connection is NULL\n");
               return 0;
             }
 
-	    // set the MTU value in the connnection handle
-	    g_mtu = mtu;
-	    convert_mtu_str(mtu, g_mtu_str);
 	    // set the mtu value to BtCore for Packets chunking 
-	    hmkit_core_set_mtu(read_buffer_06_mac, mtu);
+	    // set the MTU value in the connnection handle
+	    uint32_t ret = hmkit_core_set_mtu(get_bt_mac(connection), mtu);
+	    if(!ret)
+	    { // successfully set in core
+		g_mtu = mtu;
+	    }
+	    else if(ret == 1)
+	    { // Error case
+		if(mtu > 512)// Max limit imposed in core
+		{
+		   g_mtu = 512;
+		}
+		else // failure due to handle not created in core
+		{
+		   g_mtu = mtu;
+		}
+            }
+	    /*
+	    else
+	    {   // need change in core
+		g_mtu = ret;
+            }*/
+
+	    printf("  mtu (in info char)= %u\n", g_mtu);
+	    convert_mtu_str(g_mtu, g_mtu_str);
 
 	    //context = connection_for_conn_handle(att_event_mtu_exchange_complete_get_handle(packet));
 	    //if (!context) break;
@@ -848,7 +1016,7 @@ uint16_t mtu = 0;
 	     break;
 
         default:
-  ///printf("********* %s(): default \n", __FUNCTION__);
+	  //printf("********* %s(): default \n", __FUNCTION__);
           break;
       }
           break;
@@ -887,71 +1055,36 @@ uint32_t hmkit_core_connectivity_hal_init(){
     clear_connection_data(&bt_connections[i]);
   }
 
-#if 0
-  /// GET STARTED with BTstack ///
-  btstack_memory_init();
-  btstack_run_loop_init(btstack_run_loop_posix_get_instance());
-
-  //HCI log
-  /*char pklg_path[100];
-  strcpy(pklg_path, "./hci_dump");
-  strcat(pklg_path, ".pklg");
-  printf("Packet Log: %s\n", pklg_path);
-  hci_dump_open(pklg_path, HCI_DUMP_PACKETLOGGER);*/
-
-  if(hm_sdk_config_is_usb() == 1){
-    // init USB HCI
-    hci_init(hci_transport_usb_instance(), NULL);
-  } else{
-    // init UART HCI
-    config.device_name = hm_sdk_config_get_uart_device();
-
-    const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
-    const hci_transport_t * transport = hci_transport_h4_instance(uart_driver);
-    hci_init(transport, (void*) &config);
-  }
-
-
-#ifdef ENABLE_CLASSIC
-  hci_set_link_key_db(btstack_link_key_db_fs_instance());
-#endif
-
-  // inform about BTstack state
-  hci_event_callback_registration.callback = &hci_packet_handler;
-  hci_add_event_handler(&hci_event_callback_registration);
-#endif
-
   // does all the above operations
   btstack_start();
-
-  //printf("#### End: Connectivity_hal; btstack_start() \n");
 
   return 0;
 }
 
 void btstack_inits()
 {
-  //printf("***** Enter %s()  \n", __FUNCTION__);
+   //printf("***** Enter %s()  \n", __FUNCTION__);
 
-  l2cap_init();
+   l2cap_init();
 
-  // setup le device db
-  le_device_db_init();
+   // setup le device db
+   le_device_db_init();
 
    // setup SM: Display only
    sm_init();
 
-   gatt_client_init();
+   att_server_init(hm_profile_data, att_read_callback, att_write_callback);
 
-//printf("***** init attr read_callback and write callback %s()  \n", __FUNCTION__);
-  att_server_init(hm_profile_data, att_read_callback, att_write_callback);
-  //att_write_queue_init();
-  //att_attributes_init();
-  att_server_register_packet_handler(packet_handler);
+    // register for ATT event
+    att_server_register_packet_handler(attr_packet_handler);
 
-  // turn on!
-  hci_power_control(HCI_POWER_ON);
-//#endif
+    // set one-shot timer
+    heartbeat.process = &heartbeat_handler;
+    btstack_run_loop_set_timer(&heartbeat, HEARTBEAT_PERIOD_MS);
+    btstack_run_loop_add_timer(&heartbeat);
+
+    // turn on!
+    hci_power_control(HCI_POWER_ON);
 }
 
 uint32_t hmkit_core_connectivity_hal_connect(const uint8_t *mac, uint8_t macType){

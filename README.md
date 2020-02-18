@@ -6,7 +6,7 @@ The library is designed to give IOT developers simple access to High Mobility's 
 
 This repository is a development workspace for generating Python bluetooth installable sdk [Hmkit Python SDK](https://github.com/highmobility/hmkit-python/) from all the dependencies.
 
-It has been tested on Raspbian Pi Zero W.
+It has been tested on Raspbian Pi Zero W and Pi 3 Model B+.
 
 ## Getting started
 
@@ -47,7 +47,8 @@ sudo update-alternatives --install /usr/bin/python python /usr/bin/python3.7 2
 #sudo apt-get install libglib2.0-dev
 #sudo apt-get install libsqlite3-dev
 #sudo apt-get install libssl-dev
-
+#sudo apt install python3-pip
+#pip3 install pytz
 ```
 
 ```
@@ -78,7 +79,7 @@ make sdk
 
 ### How do I test? ###
 
-Build outputs can be tested from inside hmkit-python(submodule).
+Build outputs can be tested from the submodule hmkit-python.
 Refer README in [Hmkit Python SDK](https://github.com/highmobility/hmkit-python/) for more details.
 
 
@@ -90,6 +91,5 @@ See more in [CONTRIBUTING.md](https://github.com/highmobility/hmkit-python-works
 
 ## License ##
 
-This repository is using MIT license. See more in [LICENSE](https://github.com/highmobility/hmkit-python-workspace/blob/master/LICENSE)
-The included BTstack submodule is free for non-commercial use only (BSD 3-Clause License).
+This repository is using MIT license. See more in [LICENSE](https://github.com/highmobility/hmkit-python-workspace/blob/master/LICENSE). The included BTstack submodule is free for non-commercial use only (BSD 3-Clause License).
 

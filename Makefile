@@ -42,6 +42,7 @@ CFLAGS += -I$(HM_PERSISTENCE_SQLITE)
 
 CFLAGS += -I${BTSTACK_ROOT}/src/ble
 CFLAGS += -I${BTSTACK_ROOT}/src/classic
+CFLAGS += -I${BTSTACK_ROOT}/src/ble/gatt-service
 CFLAGS += -I${BTSTACK_ROOT}/src
 CFLAGS += -I${BTSTACK_ROOT}/3rd-party/mbedtls/include
 CFLAGS += -I${BTSTACK_ROOT}/3rd-party/bluedroid/decoder/include
@@ -73,6 +74,7 @@ CORE += \
 	le_device_db_fs.c \
 	wav_util.c                  \
 	btstack_stdin_posix.c \
+	raspi_get_model.c \
 
 COMMON += \
 	hci.c			            \
@@ -170,7 +172,7 @@ SRC_OBJ    = $(SRC:.c=.o)
 
 default_target: all
 
-hmservice: ${CORE_OBJ} ${ATT_OBJ} ${GATT_CLIENT_OBJ} ${SRC_OBJ} ${COMMON_OBJ} ${GATT_SERVER_OBJ} ${SM_OBJ}
+hmservice: ${CORE_OBJ} ${ATT_OBJ} ${SRC_OBJ} ${COMMON_OBJ} ${GATT_SERVER_OBJ} ${SM_OBJ} ${CLASSIC_OBJ}
 	${CC} $^ -fPIC ${CFLAGS} ${LDFLAGS} -lpthread -lssl -lcrypto -lsqlite3 -lglib-2.0 -lgio-2.0 -lm -shared -o libhmlink.so
 
 install:
@@ -231,5 +233,5 @@ sdk: all
 	# Copy the dependencies builtin library
 	cp libhmlink.so  $(SDK_LOCATION)/hmkit/hm_pyc/
 	# Copy the python c extension hm_pyc module library
-	cp $(PYC_BINDINGS)/build/lib.linux-armv6l-3.7/hmkit/hm_pyc.cpython*.so  $(SDK_LOCATION)/hmkit/hm_pyc/
+	cp $(PYC_BINDINGS)/build/lib.linux-armv*l-3.*/hmkit/hm_pyc.cpython*.so  $(SDK_LOCATION)/hmkit/hm_pyc/
 
