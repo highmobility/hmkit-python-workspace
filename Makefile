@@ -19,9 +19,11 @@ CORE += ad_parser.c
 COMMON  += btstack_run_loop_posix.c hci_transport_h4.c btstack_uart_block_posix.c le_device_db_fs.c btstack_link_key_db_fs.c
 
 VPATH += ./
+VPATH += $(WORKSPACE_HOME)
 VPATH += $(HM_OPENSSL_C)
 VPATH += $(HM_BT_CORE)
 VPATH += $(HM_PERSISTENCE_SQLITE)
+VPATH += $(PYC_BINDINGS)
 
 VPATH += ${BTSTACK_ROOT}/src
 VPATH += ${BTSTACK_ROOT}/src/ble
@@ -33,6 +35,7 @@ VPATH += ${BTSTACK_ROOT}/3rd-party/bluedroid/encoder//srce
 VPATH += ${BTSTACK_ROOT}/3rd-party/micro-ecc
 
 CFLAGS += -I.
+CFLAGS += -I$(WORKSPACE_HOME)
 CFLAGS += -I$(HM_OPENSSL_C)
 CFLAGS += -I$(HM_BT_CORE)
 CFLAGS += -I$(HM_PERSISTENCE_SQLITE)
@@ -150,30 +153,38 @@ SRC += hmkit_core_debug_hal.c
 SRC += hmkit_core_connectivity_hal.c
 SRC += hmkit_core_persistence_hal.c
 SRC += hmkit_core_api_callback.c
-SRC += $(PYC_BINDINGS)/pyc_bindings.c
+SRC += pyc_bindings.c
 
 SRC += hm_persistence_sqlite.c
 
 OBJDIR =./_build
 
 # .o for .c
-CORE_OBJ    = $(CORE:.c=.o)
-COMMON_OBJ  = $(COMMON:.c=.o)
-CLASSIC_OBJ  = $(CLASSIC:.c=.o)
-SM_OBJ = $(SM:.c=.o) $(MBEDTLS:.c=.o)
-ATT_OBJ     = $(ATT:.c=.o)
-GATT_CLIENT_OBJ = $(GATT_CLIENT:.c=.o)
-GATT_SERVER_OBJ = $(GATT_SERVER:.c=.o)
-PAN_OBJ = $(PAN:.c=.o)
-SBC_DECODER_OBJ  = $(SBC_DECODER:.c=.o)
-SBC_ENCODER_OBJ  = $(SBC_ENCODER:.c=.o)
-CVSD_PLC_OBJ = $(CVSD_PLC:.c=.o)
-SRC_OBJ    = $(SRC:.c=.o)
+CORE_OBJ    = $(CORE:%.c=$(OBJDIR)/%.o)
+COMMON_OBJ  = $(COMMON:%.c=$(OBJDIR)/%.o)
+CLASSIC_OBJ  = $(CLASSIC:%.c=$(OBJDIR)/%.o)
+SM_OBJ = $(SM:%.c=$(OBJDIR)/%.o) $(MBEDTLS:%.c=$(OBJDIR)/%.o)
+ATT_OBJ     = $(ATT:%.c=$(OBJDIR)/%.o)
+GATT_CLIENT_OBJ = $(GATT_CLIENT:%.c=$(OBJDIR)/%.o)
+GATT_SERVER_OBJ = $(GATT_SERVER:%.c=$(OBJDIR)/%.o)
+PAN_OBJ = $(PAN:%.c=$(OBJDIR)/%.o)
+SBC_DECODER_OBJ  = $(SBC_DECODER:%.c=$(OBJDIR)/%.o)
+SBC_ENCODER_OBJ  = $(SBC_ENCODER:%.c=$(OBJDIR)/%.o)
+CVSD_PLC_OBJ = $(CVSD_PLC:%.c=$(OBJDIR)/%.o)
+SRC_OBJ := $(SRC:%.c=$(OBJDIR)/%.o)
+
+#Make the Directories
+directories:
+	@mkdir -p $(OBJDIR)
 
 default_target: all
 
 hmservice: ${CORE_OBJ} ${ATT_OBJ} ${SRC_OBJ} ${COMMON_OBJ} ${GATT_SERVER_OBJ} ${SM_OBJ} ${CLASSIC_OBJ}
 	${CC} $^ -fPIC ${CFLAGS} ${LDFLAGS} -lpthread -lssl -lcrypto -lsqlite3 -lglib-2.0 -lgio-2.0 -lm -shared -o libhmlink.so
+
+#Compile
+$(OBJDIR)/%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 install:
 	sudo cp libhmlink.so /usr/lib/
@@ -191,6 +202,7 @@ clean:
 	rm -rf ${BTSTACK_ROOT}/src/ble/gatt-service/*.o
 	rm -rf ${BTCORE_OBJ}/*.o
 	rm -rf $(HM_OPENSSL_C)/*.o
+	rm -rf $(OBJDIR)
 	#rm -rf $(SDK_LOCATION)/hmkit/hm_pyc/*.py
 	#rm -rf $(SDK_LOCATION)/hmkit/hm_pyc/libhmlink.so
 
@@ -218,7 +230,7 @@ CFLAGS += $(shell python3.7-config --cflags)
 LDFLAGS += $(shell python3.7-config --ldflags) -L/usr/lib/arm-linux-gnueabihf/
 CFLAGS += -I/usr/local/lib/python3.7/dist-packages/numpy/core/include/
 
-all: hmservice install bindings
+all: directories hmservice install bindings
 
 gatt:
 
