@@ -623,6 +623,7 @@ static void phase2(int status){
 
     printf("Phase 2: Main app\n");
 
+    btstack_inits();
 }
 
 
