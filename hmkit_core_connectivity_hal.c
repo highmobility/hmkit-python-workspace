@@ -983,25 +983,15 @@ uint16_t mtu = 0;
 	    // set the MTU value in the connnection handle
 	    uint32_t ret = hmkit_core_set_mtu(get_bt_mac(connection), mtu);
 	    if(!ret)
-	    { // successfully set in core
+	    {
+		// Error case
+		// failure due to handle not created in core
 		g_mtu = mtu;
 	    }
-	    else if(ret == 1)
-	    { // Error case
-		if(mtu > 512)// Max limit imposed in core
-		{
-		   g_mtu = 512;
-		}
-		else // failure due to handle not created in core
-		{
-		   g_mtu = mtu;
-		}
-            }
-	    /*
 	    else
-	    {   // need change in core
+	    {   // successfully set in core. Use the effective MTU set in Core
 		g_mtu = ret;
-            }*/
+            }
 
 	    printf("  mtu (in info char)= %u\n", g_mtu);
 	    convert_mtu_str(g_mtu, g_mtu_str);
