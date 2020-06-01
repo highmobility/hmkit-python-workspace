@@ -623,7 +623,6 @@ static void phase2(int status){
 
     printf("Phase 2: Main app\n");
 
-    btstack_inits();
 }
 
 
@@ -979,32 +978,22 @@ uint16_t mtu = 0;
               return 0;
             }
 
-	    // set the mtu value to BtCore for Packets chunking 
-	    // set the MTU value in the connnection handle
-	    uint32_t ret = hmkit_core_set_mtu(get_bt_mac(connection), mtu);
-	    if(!ret)
-	    { // successfully set in core
-		g_mtu = mtu;
-	    }
-	    else if(ret == 1)
-	    { // Error case
-		if(mtu > 512)// Max limit imposed in core
-		{
-		   g_mtu = 512;
-		}
-		else // failure due to handle not created in core
-		{
-		   g_mtu = mtu;
-		}
-            }
-	    /*
-	    else
-	    {   // need change in core
-		g_mtu = ret;
-            }*/
+        // set the mtu value to BtCore for Packets chunking 
+        // set the MTU value in the connnection handle
+        uint32_t ret = hmkit_core_set_mtu(get_bt_mac(connection), mtu);
+        if(!ret)
+        {
+            // Error case
+            // failure due to handle not created in core
+            g_mtu = mtu;
+        }
+        else
+        {   // successfully set in core. Use the effective MTU set in Core
+            g_mtu = ret;
+        }
 
-	    printf("  mtu (in info char)= %u\n", g_mtu);
-	    convert_mtu_str(g_mtu, g_mtu_str);
+        printf("  mtu (in info char)= %u\n", g_mtu);
+        convert_mtu_str(g_mtu, g_mtu_str);
 
 	    //context = connection_for_conn_handle(att_event_mtu_exchange_complete_get_handle(packet));
 	    //if (!context) break;
