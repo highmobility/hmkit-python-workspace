@@ -735,6 +735,13 @@ static uint8_t adv_data[28] = {
         0x11, 0x07, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+uint32_t hmkit_core_connectivity_hal_set_ble_name(uint8_t *devicename){
+
+  hmkit_core_log(NULL,NULL,HMKIT_CORE_LOG_INFO,"[HMCONNECTIVITY] Set BLE Name ");
+  memcpy(adv_data+2, devicename, 8);
+  return 0;
+}
+
 uint32_t hmkit_core_connectivity_hal_advertisement_start(uint8_t *issuerId, uint8_t *appId){
 
   UNUSED(issuerId);

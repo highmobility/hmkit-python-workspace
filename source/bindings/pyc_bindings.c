@@ -60,6 +60,8 @@ int pyc_test_api();
 
 extern uint32_t hmkit_core_crypto_hal_ecc_add_signature(uint64_t appContxtId, uint8_t *data, uint8_t size, uint8_t *signature);
 
+extern uint32_t hmkit_core_connectivity_hal_set_ble_name(uint8_t *devicename);
+
 //=======================================================================================//
 //=============================== Callbacks: C to Python ================================//
 //=======================================================================================//
@@ -522,6 +524,15 @@ void py_set_dev_cert(uint8_t *cert)
 {
  	//printf("%s, %s()\n", __FILE__, __FUNCTION__);
 	hm_sdk_config_set_device_certificate(cert);
+}
+
+/**
+*
+*/
+void py_set_ble_device_name(uint8_t *name)
+{
+    //printf("%s, %s()\n", __FILE__, __FUNCTION__);
+    hmkit_core_connectivity_hal_set_ble_name(name);
 }
 
 int py_ble_advertisement_start()

@@ -41,6 +41,7 @@ void py_hm_sdk_config_set_device_certificate(uint8_t *device);
 
 int py_store_accesscertificate(uint8_t *certf, uint8_t len, uint8_t *ser_num);
 
+void py_set_ble_device_name(uint8_t *name);
 
 typedef enum
 {
